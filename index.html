@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Paws & Preferences — Demo</title>
+  <style>
+    :root{--bg:#f7f8fb;--card:#fff;--muted:#6b7280}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
+    body{background:linear-gradient(180deg,#eef2ff 0%,var(--bg) 100%);display:flex;align-items:center;justify-content:center;padding:20px}
+    .app{width:100%;max-width:420px}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    header h1{font-size:18px;margin:0}
+    .stack{position:relative;height:66vh;max-height:680px;min-height:360px}
+    .card{position:absolute;inset:0;border-radius:14px;background:var(--card);box-shadow:0 8px 30px rgba(18,38,63,.12);display:flex;flex-direction:column;overflow:hidden;touch-action:none}
+    .card img{width:100%;height:72%;object-fit:cover}
+    .meta{padding:12px;display:flex;justify-content:space-between;align-items:center}
+    .meta .title{font-weight:600}
+    .controls{display:flex;gap:10px;padding:12px;justify-content:center}
+    button{border:0;background:#fff;padding:10px;border-radius:10px;box-shadow:0 4px 12px rgba(2,6,23,.06)}
+    .summary{display:none;background:var(--card);padding:16px;border-radius:12px;box-shadow:0 8px 30px rgba(18,38,63,.08)}
+    .liked-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+    .liked-grid img{width:100%;height:120px;object-fit:cover;border-radius:8px}
+    .muted{color:var(--muted);font-size:14px}
+    .small{font-size:13px;color:var(--muted)}
+    .like-badge,.dislike-badge{position:absolute;top:18px;padding:10px 14px;border-radius:8px;font-weight:700;transform:rotate(-12deg);opacity:0;pointer-events:none}
+    .like-badge{right:18px;background:rgba(34,197,94,.12);color:#16a34a}
+    .dislike-badge{left:18px;background:rgba(239,68,68,.12);color:#dc2626}
+    @media(min-width:640px){.app{margin-top:20px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Paws & Preferences</h1>
+      <div class="small muted">Swipe right to like • left to dislike</div>
+    </header>
+
+    <main>
+      <div id="stack" class="stack" aria-live="polite"></div>
+
+      <div class="controls" style="margin-top:12px">
+        <button id="skip">Skip</button>
+        <button id="dislike">Dislike</button>
+        <button id="like">Like</button>
+        <button id="restart" style="display:none">Restart</button>
+      </div>
+
+      <div id="summary" class="summary" role="region" aria-label="Summary">
+        <div class="small muted" id="summary-text"></div>
+        <div class="liked-grid" id="liked-grid"></div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    // Client-side single-file solution
+    const NUM = 12; // number of cat images
+    const stackEl = document.getElementById('stack');
+    const liked = [];
+    let cards = [];
+
+    async function fetchCats(n){
+      // Cataas supports random images by size and tags; use unique URL to avoid caching
+      const urls = [];
+      for(let i=0;i<n;i++){
+        urls.push(`https://cataas.com/cat?${Date.now()}-${i}`);
+      }
+      return urls;
+    }
+
+    function createCard(src,index){
+      const el = document.createElement('div');
+      el.className='card';
+      el.dataset.index=index;
+      el.innerHTML = `
+        <div class="like-badge">LIKE</div>
+        <div class="dislike-badge">NOPE</div>
+        <img src="${src}" alt="Cat ${index+1}" loading="lazy">
+        <div class="meta"><div class="title">Cat #${index+1}</div><div class="small muted">Cute level: Unknown</div></div>
+      `;
+
+      // set up dragging
+      let startX=0, startY=0, translateX=0, translateY=0, dragging=false;
+      const img = el.querySelector('img');
+      const likeBadge = el.querySelector('.like-badge');
+      const dislikeBadge = el.querySelector('.dislike-badge');
+
+      function setTransform(x,y,rot,scale=1){
+        el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${scale})`;
+      }
+
+      function pointerDown(e){
+        dragging=true;
+        startX = e.touches ? e.touches[0].clientX : e.clientX;
+        startY = e.touches ? e.touches[0].clientY : e.clientY;
+        el.style.transition='none';
+      }
+      function pointerMove(e){
+        if(!dragging) return;
+        const cx = e.touches ? e.touches[0].clientX : e.clientX;
+        const cy = e.touches ? e.touches[0].clientY : e.clientY;
+        translateX = cx - startX;
+        translateY = cy - startY;
+        const rot = translateX / 12;
+        setTransform(translateX, translateY, rot);
+        likeBadge.style.opacity = translateX > 20 ? Math.min((translateX-20)/100,1) : 0;
+        dislikeBadge.style.opacity = translateX < -20 ? Math.min((-translateX-20)/100,1) : 0;
+      }
+      function pointerUp(){
+        dragging=false;
+        el.style.transition='transform 220ms ease-out';
+        const threshold = 120;
+        if(translateX > threshold){
+          // liked
+          setTransform(window.innerWidth, translateY, 30);
+          markChoice(el.dataset.index, true, el);
+        } else if(translateX < -threshold){
+          // disliked
+          setTransform(-window.innerWidth, translateY, -30);
+          markChoice(el.dataset.index, false, el);
+        } else {
+          // return
+          setTransform(0,0,0);
+          likeBadge.style.opacity = 0;
+          dislikeBadge.style.opacity = 0;
+        }
+      }
+
+      el.addEventListener('touchstart',pointerDown,{passive:true});
+      el.addEventListener('touchmove',pointerMove,{passive:true});
+      el.addEventListener('touchend',pointerUp);
+      el.addEventListener('mousedown',pointerDown);
+      window.addEventListener('mousemove',pointerMove);
+      window.addEventListener('mouseup',pointerUp);
+
+      return el;
+    }
+
+    function markChoice(index,isLike,el){
+      // push to liked if isLike
+      if(isLike) liked.push({index,src:el.querySelector('img').src});
+      // remove element after animation
+      setTimeout(()=>{
+        el.remove();
+        const remaining = Array.from(stackEl.querySelectorAll('.card'));
+        if(remaining.length===0) showSummary();
+      },240);
+    }
+
+    function renderStack(urls){
+      stackEl.innerHTML='';
+      cards = urls.map((u,i)=>createCard(u,i));
+      // stack order: last on top
+      cards.reverse().forEach((c,i)=>{
+        c.style.zIndex = 1000 - i;
+        c.style.transform = `scale(${1 - i*0.02}) translateY(${i*8}px)`;
+        stackEl.appendChild(c);
+      });
+    }
+
+    async function init(){
+      const urls = await fetchCats(NUM);
+      renderStack(urls);
+    }
+
+    function showSummary(){
+      document.getElementById('summary-text').textContent = `You liked ${liked.length} cat(s).`;
+      const grid = document.getElementById('liked-grid');
+      grid.innerHTML='';
+      liked.forEach(l=>{
+        const img = document.createElement('img');
+        img.src = l.src;
+        grid.appendChild(img);
+      });
+      document.getElementById('summary').style.display='block';
+      document.getElementById('restart').style.display='inline-block';
+    }
+
+    document.getElementById('like').addEventListener('click',()=>{
+      const top = stackEl.querySelector('.card');
+      if(!top) return;
+      top.style.transition='transform 260ms ease-out';
+      top.style.transform = `translate(${window.innerWidth}px, -40px) rotate(30deg)`;
+      markChoice(top.dataset.index,true,top);
+    });
+    document.getElementById('dislike').addEventListener('click',()=>{
+      const top = stackEl.querySelector('.card');
+      if(!top) return;
+      top.style.transition='transform 260ms ease-out';
+      top.style.transform = `translate(${-window.innerWidth}px, -40px) rotate(-30deg)`;
+      markChoice(top.dataset.index,false,top);
+    });
+    document.getElementById('skip').addEventListener('click',()=>{
+      const top = stackEl.querySelector('.card');
+      if(!top) return;
+      top.style.transition='transform 260ms ease-out';
+      top.style.transform = `translate(0px, -${window.innerHeight}px) rotate(0deg) scale(.95)`;
+      markChoice(top.dataset.index,false,top);
+    });
+    document.getElementById('restart').addEventListener('click',()=>{
+      liked.length=0;
+      document.getElementById('summary').style.display='none';
+      document.getElementById('restart').style.display='none';
+      init();
+    });
+
+    // start
+    init();
+  </script>
+</body>
+</html>
